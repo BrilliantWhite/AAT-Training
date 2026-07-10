@@ -109,9 +109,12 @@ def train_batches(model, loader, optimizer, class_weights, device: str, amp: boo
     use_amp = bool(amp and str(device).startswith("cuda"))
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     losses: list[float] = []
-    for batch_index, (images, targets) in enumerate(loader):
+    for batch_index, batch in enumerate(loader):
         if max_batches is not None and batch_index >= max_batches:
             break
+        if not isinstance(batch, (tuple, list)) or len(batch) < 2:
+            raise ValueError("Training batch must contain at least images and targets")
+        images, targets = batch[0], batch[1]
         images, targets = images.to(device), targets.to(device)
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast(device_type="cuda", enabled=use_amp):

@@ -69,6 +69,18 @@ class TrainingCnnTests(unittest.TestCase):
         self.assertEqual(result["batches"], 2)
         self.assertTrue(np.isfinite(result["mean_loss"]))
 
+    def test_training_accepts_traceable_batches_with_lane_ids(self) -> None:
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+        from aat_training.cnn import build_backbone, train_batches
+
+        model = build_backbone("resnet18", class_count=6, dropout=0.2, pretrained=False)
+        dataset = TensorDataset(torch.rand(2, 3, 128, 384), torch.tensor([0, 1]), torch.tensor([101, 102]))
+        loader = DataLoader(dataset, batch_size=2)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        result = train_batches(model, loader, optimizer, torch.ones(6), device="cpu", amp=False, max_batches=1)
+        self.assertEqual(result["batches"], 1)
+
     def test_checkpoint_contains_required_training_provenance(self) -> None:
         import torch
         from aat_training.cnn import build_backbone, save_checkpoint
