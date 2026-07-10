@@ -1,0 +1,9 @@
+schema_version: aat-nested-folds-v1
+version: folds_v1
+outer_splits: 5
+inner_splits: 3
+seed: 20260710
+group_key: parent_gel
+target_key: canonical_label
+eligibility_key: common_eligible
+assignment_format: long_per_outer_scenario

@@ -1,0 +1,11 @@
+schema_version: aat-rare-assistance-v1
+common_classes: [M, MZ, MS, SZ, ZZ, SS]
+allele_loss: bce_with_logits
+multitask_weights: [0.2, 0.5, 1.0]
+embedding_dim: 128
+retrieval_metric: cosine
+top_k: 3
+exclude_same_parent_gel: true
+target_rare_sensitivity: 0.9
+metric_learning_first_round: false
+

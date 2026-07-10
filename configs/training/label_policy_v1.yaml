@@ -1,0 +1,41 @@
+schema_version: aat-label-policy-v1
+label_version: v1
+common_classes:
+  - M
+  - MZ
+  - MS
+  - SZ
+  - ZZ
+  - SS
+canonical_aliases:
+  MM: M
+named_variants:
+  MZBRISTOL: MZBristol
+  MZPRATT: MZPratt
+  MMALTON: MMalton
+  ZZBRISTOL: ZZBristol
+unknown_labels:
+  - UNKNOWN
+  - UNLABELLED
+  - UNLABELED
+approved_exclusions:
+  - "MS'"
+  - "MS]"
+simple_allele_codes:
+  - B
+  - C
+  - E
+  - F
+  - G
+  - I
+  - L
+  - M
+  - P
+  - Q
+  - S
+  - T
+  - W
+  - X
+  - Y
+  - Z
+degraded_token: DEGRADED

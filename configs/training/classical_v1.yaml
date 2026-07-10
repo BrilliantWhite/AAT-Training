@@ -1,0 +1,20 @@
+schema_version: aat-classical-training-v1
+feature_contract: normalized_profile_plus_peak_summary_v1
+models:
+  logistic:
+    candidates:
+      - C: 0.1
+      - C: 1.0
+      - C: 10.0
+  rbf_svm:
+    candidates:
+      - C: 1.0
+        gamma: scale
+      - C: 10.0
+        gamma: scale
+      - C: 10.0
+        gamma: 0.01
+selection_metric: inner_macro_f1
+outer_metric: oof_macro_f1
+class_weight: balanced
+max_iter: 2000

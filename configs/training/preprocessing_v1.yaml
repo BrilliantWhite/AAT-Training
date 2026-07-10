@@ -1,0 +1,8 @@
+schema_version: aat-preprocessing-v1
+target_height: 128
+target_width: 384
+pad_value: 255
+profile_length: 128
+resize_interpolation: bilinear
+crop_source: reviewed_rectangle
+profile_definition: one_minus_mean_luminance_over_content_width

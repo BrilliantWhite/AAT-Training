@@ -1,0 +1,21 @@
+schema_version: aat-cnn-training-v1
+backbone: resnet18
+pretrained: true
+batch_size: 32
+max_epochs: 60
+patience: 8
+amp: true
+learning_rates: [0.0001, 0.0003]
+weight_decays: [0.0001, 0.001]
+dropouts: [0.2, 0.4]
+loss: inverse_sqrt_weighted_ce
+augmentations: &physical
+  rotation_degrees: 2
+  crop_scale_min: 0.95
+  vertical_flip: false
+  mixup: false
+  brightness: 0.08
+  contrast: 0.08
+  saturation: 0.03
+  blur_sigma_max: 0.6
+
