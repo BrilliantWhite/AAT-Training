@@ -33,6 +33,8 @@ def main() -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--no-pretrained", action="store_true", help="Smoke tests only; formal runs must use pretrained weights.")
     args = parser.parse_args()
+    if args.dataset_version.startswith("frozen") and args.no_pretrained:
+        parser.error("Formal frozen-dataset runs must use ImageNet pretrained weights")
     revision = subprocess.check_output(["git", "-c", f"safe.directory={PROJECT_ROOT.as_posix()}", "rev-parse", "--short", "HEAD"], cwd=PROJECT_ROOT, text=True).strip()
     provenance = {
         "dataset_version": args.dataset_version, "dataset_manifest_sha256": digest(args.dataset_manifest),
@@ -40,6 +42,8 @@ def main() -> int:
         "seed": args.seed, "code_revision": revision,
     }
     config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
+    if args.dataset_version.startswith("frozen") and not bool(config.get("pretrained")):
+        parser.error("Formal frozen-dataset config must declare pretrained: true")
     output = run_cnn_nested_cv(args.inputs_dir, args.folds, args.experiments_root, args.experiment_id, provenance, config, args.device, not args.no_pretrained)
     print(f"completed {args.experiment_id}: {output}")
     return 0

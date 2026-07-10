@@ -18,7 +18,7 @@
 - CPU 内存：建议至少 `32 GB`，截图中的 90GB 足够。
 - 系统盘：30GB 可以使用，但不要把训练数据和 checkpoint 放在系统盘。
 - 数据盘：建议扩展到 `100–200 GB`；训练文件统一放到 `/root/autodl-tmp/AAT-Training`。
-- 镜像：选择已包含 PyTorch 2.x、CUDA 12.x 的官方基础镜像即可。
+- RTX 5090 镜像优先选择 PyTorch 2.12+、CUDA 13.0；备选为支持 CUDA 12.8 的 PyTorch 2.7+。不要使用 CUDA 12.6 或更旧构建。
 
 AutoDL 文档说明数据盘默认挂载到 `/root/autodl-tmp`，系统盘和数据盘用途不同；本地数据盘没有可靠性承诺，所以最终结果还必须下载或同步到其他存储：[实例目录说明](https://www.autodl.com/docs/env/)、[数据保留说明](https://www.autodl.com/docs/instance_data/)。
 

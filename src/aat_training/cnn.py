@@ -356,6 +356,11 @@ def run_cnn_nested_cv(
         fold_summaries.append({"outer_fold": outer_fold, "selected": best, "candidate_results": candidate_scores, "best_epoch": best_epoch})
     predictions_path = run.path / "predictions.csv"
     all_predictions.sort(key=lambda row: row["lane_id"])
+    eligible_ids = set(records)
+    predicted_ids = [str(row["lane_id"]) for row in all_predictions]
+    if len(predicted_ids) != len(eligible_ids) or set(predicted_ids) != eligible_ids:
+        missing = sorted(eligible_ids - set(predicted_ids))[:5]
+        raise ValueError(f"CNN OOF predictions do not cover every eligible lane exactly once; missing={missing}")
     write_prediction_rows(predictions_path, all_predictions)
     metrics = evaluate_common(all_predictions)
     metrics["outer_folds"] = fold_summaries
