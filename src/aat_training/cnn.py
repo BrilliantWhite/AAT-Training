@@ -251,8 +251,13 @@ def _fit_with_validation(
     )
     best_score, best_epoch, best_state, stale = -1.0, 0, None, 0
     for epoch in range(1, int(config["max_epochs"]) + 1):
-        train_batches(model, train_loader, optimizer, weights, device, bool(config["amp"]))
+        train_result = train_batches(model, train_loader, optimizer, weights, device, bool(config["amp"]))
         score, _ = _evaluate_batches(model, validation_loader, device)
+        print(
+            f"cnn_progress backbone={config['backbone']} seed={seed} epoch={epoch} "
+            f"train_loss={train_result['mean_loss']:.6f} validation_macro_f1={score:.6f}",
+            flush=True,
+        )
         if score > best_score + 1e-12:
             best_score, best_epoch, stale = score, epoch, 0
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
@@ -279,8 +284,13 @@ def _fit_fixed_epochs(records, inputs_dir: Path, config: Mapping[str, Any], cand
         _make_image_dataset(records, inputs_dir, True, config["augmentations"]),
         batch_size=int(config["batch_size"]), shuffle=True, num_workers=int(config.get("num_workers", 0)), pin_memory=str(device).startswith("cuda"),
     )
-    for _ in range(int(epochs)):
-        train_batches(model, loader, optimizer, weights, device, bool(config["amp"]))
+    for epoch in range(1, int(epochs) + 1):
+        result = train_batches(model, loader, optimizer, weights, device, bool(config["amp"]))
+        print(
+            f"cnn_refit backbone={config['backbone']} seed={seed} epoch={epoch}/{epochs} "
+            f"train_loss={result['mean_loss']:.6f}",
+            flush=True,
+        )
     return model
 
 
