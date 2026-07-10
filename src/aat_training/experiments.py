@@ -90,3 +90,18 @@ def complete_experiment(run: ExperimentRun, artifact_paths: list[Path], summary:
     manifest["artifacts"] = dict(sorted(artifacts.items()))
     manifest["summary"] = dict(summary)
     run.run_manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def fail_experiment(run_dir: Path, error: BaseException) -> None:
+    """Fail a created run once while preserving its partial artifacts for audit."""
+
+    run_dir = Path(run_dir).resolve()
+    manifest_path = run_dir / "run_manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Experiment manifest does not exist: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("status") != "running":
+        raise ValueError(f"Experiment is not running: {manifest.get('status')}")
+    manifest["status"] = "failed"
+    manifest["failure"] = {"type": type(error).__name__, "message": str(error)}
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

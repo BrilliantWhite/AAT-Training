@@ -93,6 +93,23 @@ class TrainingExperimentRegistryTests(unittest.TestCase):
             with self.assertRaisesRegex(FileExistsError, "already exists"):
                 experiments.create_experiment(root, "EXP-OK", {}, provenance)
 
+    def test_running_experiment_can_be_failed_once_with_auditable_error(self) -> None:
+        experiments = load_experiments_module()
+        provenance = {
+            "dataset_version": "frozen_v1", "dataset_manifest_sha256": "a" * 64,
+            "fold_version": "folds_v1", "fold_manifest_sha256": "b" * 64,
+            "seed": 1, "code_revision": "abcdef1",
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            run = experiments.create_experiment(Path(tmp_dir), "EXP-FAIL-001", {}, provenance)
+            experiments.fail_experiment(run.path, ValueError("bad training batch"))
+            manifest = json.loads(run.run_manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "failed")
+            self.assertEqual(manifest["failure"]["type"], "ValueError")
+            self.assertEqual(manifest["failure"]["message"], "bad training batch")
+            with self.assertRaisesRegex(ValueError, "not running"):
+                experiments.fail_experiment(run.path, RuntimeError("second failure"))
+
 
 if __name__ == "__main__":
     unittest.main()

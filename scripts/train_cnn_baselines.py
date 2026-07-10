@@ -12,6 +12,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from aat_training.cnn import run_cnn_nested_cv  # noqa: E402
+from aat_training.experiments import fail_experiment  # noqa: E402
 
 
 def digest(path: Path) -> str:
@@ -44,7 +45,13 @@ def main() -> int:
     config = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     if args.dataset_version.startswith("frozen") and not bool(config.get("pretrained")):
         parser.error("Formal frozen-dataset config must declare pretrained: true")
-    output = run_cnn_nested_cv(args.inputs_dir, args.folds, args.experiments_root, args.experiment_id, provenance, config, args.device, not args.no_pretrained)
+    try:
+        output = run_cnn_nested_cv(args.inputs_dir, args.folds, args.experiments_root, args.experiment_id, provenance, config, args.device, not args.no_pretrained)
+    except BaseException as error:
+        run_dir = args.experiments_root / args.experiment_id
+        if (run_dir / "run_manifest.json").is_file():
+            fail_experiment(run_dir, error)
+        raise
     print(f"completed {args.experiment_id}: {output}")
     return 0
 
