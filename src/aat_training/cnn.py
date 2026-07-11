@@ -63,6 +63,12 @@ def inverse_sqrt_class_weights(counts: Sequence[int]):
     return weights / weights.max()
 
 
+def _inception_constructor_kwargs(pretrained: bool, weights: Any) -> dict[str, Any]:
+    if pretrained:
+        return {"weights": weights}
+    return {"weights": None, "aux_logits": False, "init_weights": False}
+
+
 def build_backbone(backbone_name: str, class_count: int, dropout: float, pretrained: bool = True):
     """Construct one registered torchvision model; downloads occur only when requested."""
 
@@ -83,11 +89,7 @@ def build_backbone(backbone_name: str, class_count: int, dropout: float, pretrai
         in_features = model.classifier[-1].in_features
         model.classifier = nn.Sequential(nn.Dropout(float(dropout)), nn.Linear(in_features, class_count))
     else:
-        model = models.inception_v3(
-            weights=models.Inception_V3_Weights.DEFAULT if pretrained else None,
-            aux_logits=pretrained,
-            init_weights=pretrained,
-        )
+        model = models.inception_v3(**_inception_constructor_kwargs(pretrained, models.Inception_V3_Weights.DEFAULT))
         model.aux_logits = False
         model.AuxLogits = None
         model.fc = nn.Sequential(nn.Dropout(float(dropout)), nn.Linear(model.fc.in_features, class_count))

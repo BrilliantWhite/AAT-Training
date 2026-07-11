@@ -13,6 +13,14 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
 class TrainingCnnTests(unittest.TestCase):
+    def test_pretrained_inception_uses_torchvision_weights_contract(self) -> None:
+        from aat_training.cnn import _inception_constructor_kwargs
+
+        pretrained = _inception_constructor_kwargs(pretrained=True, weights="DEFAULT")
+        self.assertEqual(pretrained, {"weights": "DEFAULT"})
+        untrained = _inception_constructor_kwargs(pretrained=False, weights="DEFAULT")
+        self.assertEqual(untrained, {"weights": None, "aux_logits": False, "init_weights": False})
+
     def test_registered_backbones_and_pretrained_contract(self) -> None:
         from aat_training.cnn import build_backbone
 
