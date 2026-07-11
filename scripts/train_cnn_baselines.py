@@ -19,7 +19,7 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run fixed grouped nested-CV AAT CNN baselines.")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--inputs-dir", type=Path, required=True)
@@ -33,6 +33,12 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=20260710)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--no-pretrained", action="store_true", help="Smoke tests only; formal runs must use pretrained weights.")
+    parser.add_argument("--resume", action="store_true", help="Resume only fully validated completed outer folds for this experiment ID.")
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
     if args.dataset_version.startswith("frozen") and args.no_pretrained:
         parser.error("Formal frozen-dataset runs must use ImageNet pretrained weights")
@@ -46,11 +52,25 @@ def main() -> int:
     if args.dataset_version.startswith("frozen") and not bool(config.get("pretrained")):
         parser.error("Formal frozen-dataset config must declare pretrained: true")
     try:
-        output = run_cnn_nested_cv(args.inputs_dir, args.folds, args.experiments_root, args.experiment_id, provenance, config, args.device, not args.no_pretrained)
+        output = run_cnn_nested_cv(
+            args.inputs_dir,
+            args.folds,
+            args.experiments_root,
+            args.experiment_id,
+            provenance,
+            config,
+            args.device,
+            not args.no_pretrained,
+            resume=args.resume,
+        )
     except BaseException as error:
         run_dir = args.experiments_root / args.experiment_id
         if (run_dir / "run_manifest.json").is_file():
-            fail_experiment(run_dir, error)
+            import json
+
+            manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+            if manifest.get("status") == "running":
+                fail_experiment(run_dir, error)
         raise
     print(f"completed {args.experiment_id}: {output}")
     return 0

@@ -306,11 +306,13 @@ def run_cnn_nested_cv(
     config: Mapping[str, Any],
     device: str,
     pretrained: bool = True,
+    resume: bool = False,
 ):
     """Execute fixed grouped nested CV and register checkpoints plus OOF predictions."""
 
     from torch.utils.data import DataLoader
-    from .experiments import create_experiment, complete_experiment
+    from .cnn_resume import file_sha256, load_completed_fold_bundles, write_completed_fold_bundle
+    from .experiments import create_experiment, complete_experiment, open_experiment_for_resume, release_experiment_lock
     from .metrics import evaluate_common
     from .predictions import write_prediction_rows
 
@@ -318,66 +320,117 @@ def run_cnn_nested_cv(
     inputs_dir = Path(inputs_dir)
     records = {row["lane_id"]: row for row in _read_csv(inputs_dir / "inputs.csv") if row["common_eligible"] == "1"}
     assignments = _read_csv(folds_path)
-    run = create_experiment(experiments_root, experiment_id, dict(config), provenance)
+    run = (
+        open_experiment_for_resume(experiments_root, experiment_id, dict(config), provenance)
+        if resume
+        else create_experiment(experiments_root, experiment_id, dict(config), provenance)
+    )
     checkpoints = run.path / "checkpoints"
-    checkpoints.mkdir()
+    checkpoints.mkdir(exist_ok=resume)
+    folds_dir = run.path / "folds"
+    folds_dir.mkdir(exist_ok=resume)
     candidates = _candidate_configs(config)
     seed = int(provenance["seed"])
-    all_predictions: list[dict[str, Any]] = []
-    fold_summaries: list[dict[str, Any]] = []
-    checkpoint_paths: list[Path] = []
-    for outer_fold in sorted({int(row["outer_fold"]) for row in assignments}):
-        scenario = [row for row in assignments if int(row["outer_fold"]) == outer_fold]
-        train_rows = [row for row in scenario if row["outer_role"] == "train" and row["lane_id"] in records]
-        test_ids = sorted(row["lane_id"] for row in scenario if row["outer_role"] == "test" and row["lane_id"] in records)
-        candidate_scores = []
-        for candidate_index, candidate in enumerate(candidates):
-            inner_scores, inner_epochs = [], []
-            for inner_fold in sorted({int(row["inner_fold"]) for row in train_rows}):
-                train_ids = [row["lane_id"] for row in train_rows if int(row["inner_fold"]) != inner_fold]
-                validation_ids = [row["lane_id"] for row in train_rows if int(row["inner_fold"]) == inner_fold]
-                _, score, epoch = _fit_with_validation(
-                    [records[lane_id] for lane_id in train_ids], [records[lane_id] for lane_id in validation_ids], inputs_dir,
-                    config, candidate, seed + outer_fold * 1000 + candidate_index * 10 + inner_fold, device, pretrained,
-                )
-                inner_scores.append(score)
-                inner_epochs.append(epoch)
-            candidate_scores.append({"params": candidate, "macro_f1": float(np.mean(inner_scores)), "fold_scores": inner_scores, "epochs": inner_epochs})
-        best_index = max(range(len(candidate_scores)), key=lambda index: (candidate_scores[index]["macro_f1"], -index))
-        best = candidate_scores[best_index]
-        best_epoch = max(1, int(round(float(np.median(best["epochs"])))))
-        validation_score = float(best["macro_f1"])
-        model = _fit_fixed_epochs(
-            [records[row["lane_id"]] for row in train_rows], inputs_dir, config, best["params"], seed + outer_fold, device, pretrained, best_epoch
+    outer_folds = sorted({int(row["outer_fold"]) for row in assignments})
+    test_ids_by_fold = {
+        outer_fold: {
+            row["lane_id"] for row in assignments
+            if int(row["outer_fold"]) == outer_fold and row["outer_role"] == "test" and row["lane_id"] in records
+        }
+        for outer_fold in outer_folds
+    }
+    resume_provenance = {**dict(provenance), "experiment_id": experiment_id}
+    restored = load_completed_fold_bundles(
+        run.path,
+        expected_outer_folds=set(outer_folds),
+        expected_lane_ids_by_fold=test_ids_by_fold,
+        authoritative_records=records,
+        expected_provenance=resume_provenance,
+        expected_config_sha256=file_sha256(run.resolved_config_path),
+        candidate_grid=candidates,
+    ) if resume else []
+    all_predictions: list[dict[str, Any]] = [row for bundle in restored for row in bundle.predictions]
+    fold_summaries: list[dict[str, Any]] = [bundle.summary for bundle in restored]
+    checkpoint_paths: list[Path] = [bundle.checkpoint_path for bundle in restored]
+    fold_bundle_paths: list[Path] = [folds_dir / f"outer_fold_{bundle.outer_fold}.json" for bundle in restored]
+    restored_folds = {bundle.outer_fold for bundle in restored}
+    try:
+        for outer_fold in outer_folds:
+            if outer_fold in restored_folds:
+                print(f"cnn_resume experiment={experiment_id} restored_outer_fold={outer_fold}", flush=True)
+                continue
+            scenario = [row for row in assignments if int(row["outer_fold"]) == outer_fold]
+            train_rows = [row for row in scenario if row["outer_role"] == "train" and row["lane_id"] in records]
+            test_ids = sorted(test_ids_by_fold[outer_fold])
+            candidate_scores = []
+            for candidate_index, candidate in enumerate(candidates):
+                inner_scores, inner_epochs = [], []
+                for inner_fold in sorted({int(row["inner_fold"]) for row in train_rows}):
+                    train_ids = [row["lane_id"] for row in train_rows if int(row["inner_fold"]) != inner_fold]
+                    validation_ids = [row["lane_id"] for row in train_rows if int(row["inner_fold"]) == inner_fold]
+                    _, score, epoch = _fit_with_validation(
+                        [records[lane_id] for lane_id in train_ids], [records[lane_id] for lane_id in validation_ids], inputs_dir,
+                        config, candidate, seed + outer_fold * 1000 + candidate_index * 10 + inner_fold, device, pretrained,
+                    )
+                    inner_scores.append(score)
+                    inner_epochs.append(epoch)
+                candidate_scores.append({"params": candidate, "macro_f1": float(np.mean(inner_scores)), "fold_scores": inner_scores, "epochs": inner_epochs})
+            best_index = max(range(len(candidate_scores)), key=lambda index: (candidate_scores[index]["macro_f1"], -index))
+            best = candidate_scores[best_index]
+            best_epoch = max(1, int(round(float(np.median(best["epochs"])))))
+            validation_score = float(best["macro_f1"])
+            model = _fit_fixed_epochs(
+                [records[row["lane_id"]] for row in train_rows], inputs_dir, config, best["params"], seed + outer_fold, device, pretrained, best_epoch
+            )
+            test_loader = DataLoader(_make_image_dataset([records[lane_id] for lane_id in test_ids], inputs_dir, False, config["augmentations"]), batch_size=int(config["batch_size"]), shuffle=False)
+            _, predictions = _evaluate_batches(model, test_loader, device)
+            fold_predictions: list[dict[str, Any]] = []
+            for lane_id, probabilities, target in predictions:
+                predicted = int(probabilities.argmax())
+                row = {
+                    "experiment_id": experiment_id, "dataset_version": provenance["dataset_version"], "fold_version": provenance["fold_version"],
+                    "config_id": f"{experiment_id}-outer-{outer_fold}", "seed": seed, "code_revision": provenance["code_revision"],
+                    "lane_id": lane_id, "parent_gel": records[lane_id]["parent_gel"], "outer_fold": outer_fold,
+                    "true_label": COMMON_CLASSES[target], "predicted_label": COMMON_CLASSES[predicted],
+                }
+                row.update({f"prob_{label}": float(probabilities[index]) for index, label in enumerate(COMMON_CLASSES)})
+                fold_predictions.append(row)
+            checkpoint_path = checkpoints / f"outer_fold_{outer_fold}.pt"
+            checkpoint_provenance = {**dict(provenance), "experiment_id": experiment_id, "outer_fold": outer_fold, "config": {**dict(config), "selected": best["params"]}}
+            save_checkpoint(checkpoint_path, model, checkpoint_provenance, best_epoch, validation_score)
+            fold_summary = {"outer_fold": outer_fold, "selected": best, "candidate_results": candidate_scores, "best_epoch": best_epoch}
+            fold_bundle_path = write_completed_fold_bundle(
+                run.path,
+                outer_fold=outer_fold,
+                predictions=fold_predictions,
+                summary=fold_summary,
+                checkpoint_path=checkpoint_path,
+                provenance=resume_provenance,
+                resolved_config_sha256=file_sha256(run.resolved_config_path),
+            )
+            all_predictions.extend(fold_predictions)
+            checkpoint_paths.append(checkpoint_path)
+            fold_summaries.append(fold_summary)
+            fold_bundle_paths.append(fold_bundle_path)
+        predictions_path = run.path / "predictions.csv"
+        all_predictions.sort(key=lambda row: row["lane_id"])
+        fold_summaries.sort(key=lambda row: int(row["outer_fold"]))
+        eligible_ids = set(records)
+        predicted_ids = [str(row["lane_id"]) for row in all_predictions]
+        if len(predicted_ids) != len(eligible_ids) or set(predicted_ids) != eligible_ids:
+            missing = sorted(eligible_ids - set(predicted_ids))[:5]
+            raise ValueError(f"CNN OOF predictions do not cover every eligible lane exactly once; missing={missing}")
+        write_prediction_rows(predictions_path, all_predictions)
+        metrics = evaluate_common(all_predictions)
+        metrics["outer_folds"] = fold_summaries
+        metrics_path = run.path / "metrics.json"
+        metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        complete_experiment(
+            run,
+            [predictions_path, metrics_path, *checkpoint_paths, *fold_bundle_paths],
+            {"backbone": config["backbone"], "oof_count": len(all_predictions), "macro_f1": metrics["macro_f1"]},
         )
-        test_loader = DataLoader(_make_image_dataset([records[lane_id] for lane_id in test_ids], inputs_dir, False, config["augmentations"]), batch_size=int(config["batch_size"]), shuffle=False)
-        _, predictions = _evaluate_batches(model, test_loader, device)
-        for lane_id, probabilities, target in predictions:
-            predicted = int(probabilities.argmax())
-            row = {
-                "experiment_id": experiment_id, "dataset_version": provenance["dataset_version"], "fold_version": provenance["fold_version"],
-                "config_id": f"{experiment_id}-outer-{outer_fold}", "seed": seed, "code_revision": provenance["code_revision"],
-                "lane_id": lane_id, "parent_gel": records[lane_id]["parent_gel"], "outer_fold": outer_fold,
-                "true_label": COMMON_CLASSES[target], "predicted_label": COMMON_CLASSES[predicted],
-            }
-            row.update({f"prob_{label}": float(probabilities[index]) for index, label in enumerate(COMMON_CLASSES)})
-            all_predictions.append(row)
-        checkpoint_path = checkpoints / f"outer_fold_{outer_fold}.pt"
-        checkpoint_provenance = {**dict(provenance), "experiment_id": experiment_id, "outer_fold": outer_fold, "config": {**dict(config), "selected": best["params"]}}
-        save_checkpoint(checkpoint_path, model, checkpoint_provenance, best_epoch, validation_score)
-        checkpoint_paths.append(checkpoint_path)
-        fold_summaries.append({"outer_fold": outer_fold, "selected": best, "candidate_results": candidate_scores, "best_epoch": best_epoch})
-    predictions_path = run.path / "predictions.csv"
-    all_predictions.sort(key=lambda row: row["lane_id"])
-    eligible_ids = set(records)
-    predicted_ids = [str(row["lane_id"]) for row in all_predictions]
-    if len(predicted_ids) != len(eligible_ids) or set(predicted_ids) != eligible_ids:
-        missing = sorted(eligible_ids - set(predicted_ids))[:5]
-        raise ValueError(f"CNN OOF predictions do not cover every eligible lane exactly once; missing={missing}")
-    write_prediction_rows(predictions_path, all_predictions)
-    metrics = evaluate_common(all_predictions)
-    metrics["outer_folds"] = fold_summaries
-    metrics_path = run.path / "metrics.json"
-    metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    complete_experiment(run, [predictions_path, metrics_path, *checkpoint_paths], {"backbone": config["backbone"], "oof_count": len(all_predictions), "macro_f1": metrics["macro_f1"]})
-    return run.path
+        return run.path
+    finally:
+        if resume:
+            release_experiment_lock(run)
